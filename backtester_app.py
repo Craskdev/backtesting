@@ -4,17 +4,15 @@ import matplotlib.pyplot as plt
 from pycoingecko import CoinGeckoAPI
 from datetime import datetime, timedelta
 
-# Init CoinGecko client
 cg = CoinGeckoAPI()
 
-# Supported assets (mapped for CoinGecko IDs)
 SYMBOL_MAP = {
     'XRP/USDT': 'ripple',
     'BTC/USDT': 'bitcoin',
     'ETH/USDT': 'ethereum',
 }
 
-def fetch_ohlcv_coingecko(symbol_id, hours):
+def fetch_ohlcv(symbol_id, hours):
     try:
         coin_id = SYMBOL_MAP[symbol_id]
         to_ts = int(datetime.now().timestamp())
@@ -33,11 +31,11 @@ def fetch_ohlcv_coingecko(symbol_id, hours):
         df.columns = ['open', 'high', 'low', 'close']
         df.dropna(inplace=True)
         df.reset_index(inplace=True)
-        df['volume'] = 1  # placeholder volume
+        df['volume'] = 1
         df['datetime'] = df['timestamp'].dt.tz_localize('UTC')
         return df
     except Exception as e:
-        st.error(f"Failed to fetch data: {e}")
+        st.error(f"Error fetching data: {e}")
         return pd.DataFrame()
 
 def calculate_indicators(df, fast_ema, slow_ema, adx_len):
@@ -99,8 +97,22 @@ def run_backtest(df, fast_ema, slow_ema, adx_len, adx_thresh, trade_size, levera
 
     return pd.DataFrame(trades), round(balance, 2)
 
+def run_batch(df, trade_size, leverage):
+    best_result = None
+    best_pnl = float('-inf')
+
+    for fast in range(2, 10):
+        for slow in range(fast + 1, 16):
+            for adx in range(3, 10):
+                for thresh in range(20, 40, 5):
+                    _, pnl = run_backtest(df, fast, slow, adx, thresh, trade_size, leverage)
+                    if pnl > best_pnl:
+                        best_pnl = pnl
+                        best_result = (fast, slow, adx, thresh, pnl)
+    return best_result
+
 # === Streamlit GUI ===
-st.title("CoinGecko-Powered EMA + ADX Backtester")
+st.title("CoinGecko EMA + ADX Backtester with Optimization")
 
 symbol = st.selectbox("Symbol", list(SYMBOL_MAP.keys()), index=0)
 hours = st.slider("Backtest Hours (x3)", min_value=24, max_value=720, step=3, value=120)
@@ -111,18 +123,33 @@ adx_thresh = st.number_input("ADX Threshold", value=27, min_value=5, max_value=5
 trade_size = st.number_input("Trade Size ($)", value=1000, min_value=10)
 leverage = st.number_input("Leverage (x)", value=5.0, min_value=1.0, step=0.5)
 
-if st.button("Run Backtest"):
-    df = fetch_ohlcv_coingecko(symbol, hours)
-    if df.empty:
-        st.stop()
+col1, col2 = st.columns(2)
 
-    trades_df, total_pnl = run_backtest(df, fast_ema, slow_ema, adx_len, adx_thresh, trade_size, leverage)
+with col1:
+    if st.button("Run Single Backtest"):
+        df = fetch_ohlcv(symbol, hours)
+        if df.empty:
+            st.stop()
+        trades_df, total_pnl = run_backtest(df, fast_ema, slow_ema, adx_len, adx_thresh, trade_size, leverage)
 
-    if trades_df.empty:
-        st.warning("No trades executed.")
-    else:
-        st.success(f"Total PnL: ${total_pnl:.2f} from {len(trades_df)} trades")
-        colors = ['green' if x > 0 else 'red' for x in trades_df['pnl']]
-        fig, ax = plt.subplots()
-        trades_df.plot(x='entry_time', y='pnl', kind='bar', color=colors, ax=ax, legend=False)
-        st.pyplot(fig)
+        if trades_df.empty:
+            st.warning("No trades executed.")
+        else:
+            st.success(f"Total PnL: ${total_pnl:.2f} from {len(trades_df)} trades")
+            colors = ['green' if x > 0 else 'red' for x in trades_df['pnl']]
+            fig, ax = plt.subplots()
+            trades_df.plot(x='entry_time', y='pnl', kind='bar', color=colors, ax=ax, legend=False)
+            st.pyplot(fig)
+
+with col2:
+    if st.button("Run Batch Optimization"):
+        df = fetch_ohlcv(symbol, hours)
+        if df.empty:
+            st.stop()
+        result = run_batch(df, trade_size, leverage)
+        if result:
+            f, s, a, t, p = result
+            st.success(f"Best PnL: ${p:.2f}")
+            st.info(f"Fast EMA: {f}, Slow EMA: {s}, ADX Len: {a}, Threshold: {t}")
+        else:
+            st.warning("No profitable combination found.")
