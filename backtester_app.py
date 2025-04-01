@@ -95,6 +95,14 @@ def run_backtest(df, fast_ema, slow_ema, adx_len, adx_thresh, trade_size, levera
                 position = signal
                 balance += pnl
 
+    if trades:
+        pnl_series = pd.Series([t['pnl'] for t in trades])
+        equity = pnl_series.cumsum()
+        for idx, eq in enumerate(equity):
+            trades[idx]['equity'] = eq
+    else:
+        trades = []
+
     return pd.DataFrame(trades), round(balance, 2)
 
 def run_batch(df, trade_size, leverage):
@@ -112,7 +120,7 @@ def run_batch(df, trade_size, leverage):
     return best_result
 
 # === Streamlit GUI ===
-st.title("CoinGecko EMA + ADX Backtester with Optimization")
+st.title("📊 CoinGecko EMA + ADX Backtester with Optimization & Equity Curve")
 
 symbol = st.selectbox("Symbol", list(SYMBOL_MAP.keys()), index=0)
 hours = st.slider("Backtest Hours (x3)", min_value=24, max_value=720, step=3, value=120)
@@ -140,6 +148,12 @@ with col1:
             fig, ax = plt.subplots()
             trades_df.plot(x='entry_time', y='pnl', kind='bar', color=colors, ax=ax, legend=False)
             st.pyplot(fig)
+
+            st.subheader("Equity Curve")
+            fig2, ax2 = plt.subplots()
+            trades_df['equity'] = trades_df['equity'].fillna(method='ffill')
+            trades_df.plot(x='entry_time', y='equity', ax=ax2, legend=False)
+            st.pyplot(fig2)
 
 with col2:
     if st.button("Run Batch Optimization"):
