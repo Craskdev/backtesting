@@ -4,7 +4,8 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 def fetch_ohlcv(hour_count):
-    exchange = ccxt.binance({'enableRateLimit': True})
+    exchange = ccxt.bybit({'enableRateLimit': True})
+
     data = exchange.fetch_ohlcv('XRP/USDT', timeframe='1h', limit=hour_count)
     df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
