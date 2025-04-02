@@ -12,7 +12,15 @@ SYMBOL_MAP = {
     'ETH/USDT': 'ethereum',
 }
 
-def fetch_ohlcv(symbol_id, hours):
+TIMEFRAME_MAP = {
+    '1H': '1H',
+    '3H': '3H',
+    '6H': '6H',
+    '12H': '12H',
+    '24H': '24H'
+}
+
+def fetch_ohlcv(symbol_id, hours, resample_tf='3H'):
     try:
         coin_id = SYMBOL_MAP[symbol_id]
         to_ts = int(datetime.now().timestamp())
@@ -27,7 +35,7 @@ def fetch_ohlcv(symbol_id, hours):
 
         df = pd.DataFrame(data['prices'], columns=['timestamp', 'price'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df = df.set_index('timestamp').resample('3H').ohlc()
+        df = df.set_index('timestamp').resample(resample_tf).ohlc()
         df.columns = ['open', 'high', 'low', 'close']
         df.dropna(inplace=True)
         df.reset_index(inplace=True)
@@ -108,22 +116,31 @@ def run_backtest(df, fast_ema, slow_ema, adx_len, adx_thresh, trade_size, levera
 def run_batch(df, trade_size, leverage):
     best_result = None
     best_pnl = float('-inf')
+    summary = []
 
     for fast in range(2, 10):
         for slow in range(fast + 1, 16):
             for adx in range(3, 10):
                 for thresh in range(20, 40, 5):
                     _, pnl = run_backtest(df, fast, slow, adx, thresh, trade_size, leverage)
+                    summary.append({
+                        'Fast EMA': fast,
+                        'Slow EMA': slow,
+                        'ADX Len': adx,
+                        'ADX Threshold': thresh,
+                        'PnL': round(pnl, 2)
+                    })
                     if pnl > best_pnl:
                         best_pnl = pnl
                         best_result = (fast, slow, adx, thresh, pnl)
-    return best_result
+
+    return best_result, pd.DataFrame(summary)
 
 # === Streamlit GUI ===
-st.title("📊 CoinGecko EMA + ADX Backtester with Optimization & Equity Curve")
+st.title("📊 EMA + ADX Backtester with Optimization, Timeframes & CSV Export")
 
 symbol = st.selectbox("Symbol", list(SYMBOL_MAP.keys()), index=0)
-hours = st.slider("Backtest Hours (x3)", min_value=24, max_value=720, step=3, value=120)
+hours = st.slider("Backtest Hours", min_value=24, max_value=720, step=3, value=120)
 fast_ema = st.number_input("Fast EMA", value=4, min_value=2)
 slow_ema = st.number_input("Slow EMA", value=8, min_value=3)
 adx_len = st.number_input("ADX Length", value=5, min_value=1)
@@ -155,15 +172,26 @@ with col1:
             trades_df.plot(x='entry_time', y='equity', ax=ax2, legend=False)
             st.pyplot(fig2)
 
+            csv = trades_df.to_csv(index=False).encode()
+            st.download_button("📥 Download Trades CSV", data=csv, file_name="single_backtest_trades.csv", mime="text/csv")
+
 with col2:
+    use_custom_tf = st.checkbox("Use Different Timeframe for Batch")
+    tf = '3H'
+    if use_custom_tf:
+        tf = st.selectbox("Timeframe (Batch Only)", list(TIMEFRAME_MAP.keys()), index=1)
+
     if st.button("Run Batch Optimization"):
-        df = fetch_ohlcv(symbol, hours)
+        df = fetch_ohlcv(symbol, hours, resample_tf=tf)
         if df.empty:
             st.stop()
-        result = run_batch(df, trade_size, leverage)
+        result, batch_df = run_batch(df, trade_size, leverage)
         if result:
             f, s, a, t, p = result
             st.success(f"Best PnL: ${p:.2f}")
             st.info(f"Fast EMA: {f}, Slow EMA: {s}, ADX Len: {a}, Threshold: {t}")
+
+            batch_csv = batch_df.to_csv(index=False).encode()
+            st.download_button("📥 Download Batch Results CSV", data=batch_csv, file_name="batch_optimization_results.csv", mime="text/csv")
         else:
             st.warning("No profitable combination found.")
